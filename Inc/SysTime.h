@@ -1,6 +1,6 @@
 /**
  * @file SysTime.h
- * @author your name (you@domain.com)
+ * @author FernandezKA (fernandes.kir@yandex.ru)
  * @brief
  * @version 0.1
  * @date 2024-01-18

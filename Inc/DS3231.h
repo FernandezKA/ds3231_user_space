@@ -12,6 +12,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <ctime>
 
 /**
@@ -24,24 +25,32 @@
  */
 class DS3231 {
 public:
-  explicit DS3231(const char *i2c_bus_path);
+  explicit DS3231(const std::string& i2c_bus_path);
   ~DS3231();
 
   bool setTime(const std::tm &time);
-  bool getTime(std::tm &time) const;
-  float getTemperature() const;
+  bool getTime(std::tm &time);
+  float getTemperature();
   bool setAlarm1(const std::tm &time, uint8_t mode);
   bool setAlarm2(const std::tm &time, uint8_t mode);
   bool clearAlarmFlags();
+  bool initialize();
 
 private:
   int i2c_bus_fd; // File descriptor for the I2C bus
-  bool initialize();
-  bool readRegister(uint8_t reg, uint8_t *buf, size_t buf_size) const;
-  bool writeRegister(uint8_t reg, const uint8_t *data, size_t data_size);
+  bool readRegister(uint8_t reg, uint8_t *buf, size_t buf_size);
+  bool writeRegister(uint8_t reg, uint8_t val);
+  bool write(const uint8_t *data, size_t data_size);
   // Constants related to the DS3231 chip
   static constexpr uint8_t DS3231_ADDRESS = 0x68;
   static constexpr uint8_t DS3231_REG_TIME = 0x00;
+  static constexpr uint8_t DS3231_REG_SEC = 0x00;
+  static constexpr uint8_t DS3231_REG_MIN = 0x01;
+  static constexpr uint8_t DS3231_REG_HOUR = 0x02;
+  static constexpr uint8_t DS3231_REG_DAY = 0x03;
+  static constexpr uint8_t DS3231_REG_DATE = 0x04;
+  static constexpr uint8_t DS3231_REG_MONTH = 0x05;
+  static constexpr uint8_t DS3231_REG_YEAR = 0x06;
   static constexpr uint8_t DS3231_REG_ALARM1 = 0x07;
   static constexpr uint8_t DS3231_REG_ALARM2 = 0x0B;
   static constexpr uint8_t DS3231_REG_CONTROL = 0x0E;

@@ -10,11 +10,13 @@
  */
 #include <DS3231.h>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
 #include <linux/i2c-dev.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 /**
@@ -25,9 +27,9 @@
  * @throws std::cerr if there is an error opening the I2C bus or setting the I2C
  * address
  */
-DS3231::DS3231(const char *i2c_bus_path) {
+DS3231::DS3231(const std::string& i2c_bus_path) {
   // Open the I2C bus
-  i2c_bus_fd = open(i2c_bus_path, O_RDWR);
+  i2c_bus_fd = open(i2c_bus_path.c_str(), O_RDWR);
   if (i2c_bus_fd < 0) {
     std::cerr << "Error opening I2C bus" << std::endl;
   } else {
@@ -62,16 +64,20 @@ DS3231::~DS3231() {
  * @throws None.
  */
 bool DS3231::setTime(const std::tm &time) {
-  uint8_t timeData[7];
-  timeData[0] = decToBcd(time.tm_sec);
-  timeData[1] = decToBcd(time.tm_min);
-  timeData[2] = decToBcd(time.tm_hour);
-  timeData[3] = decToBcd(time.tm_wday + 1); // Day of week, 1-7
-  timeData[4] = decToBcd(time.tm_mday);
-  timeData[5] = decToBcd(time.tm_mon + 1); // Months are zero-based in std::tm
-  timeData[6] = decToBcd(time.tm_year - 100); // Years since 1900
-
-  return writeRegister(DS3231_REG_TIME, timeData, sizeof(timeData));
+  ssize_t status = 0;
+  uint8_t timeSec = decToBcd(time.tm_sec) & 0x7Fu;
+  status |= writeRegister(DS3231_REG_SEC, timeSec);
+  uint8_t timeMin = decToBcd(time.tm_min) & 0x7Fu;
+  status |= writeRegister(DS3231_REG_MIN, timeMin);
+  uint8_t timeHour = decToBcd(time.tm_hour) & 0x3Fu;
+  status |= writeRegister(DS3231_REG_HOUR, timeHour);
+  uint8_t timeDate = decToBcd(time.tm_mday) & 0x3Fu;
+  status |= writeRegister(DS3231_REG_DATE, timeDate);
+  uint8_t timeMonth = decToBcd(time.tm_mon + 1) & 0x1Fu;
+  status |= writeRegister(DS3231_REG_MONTH, timeMonth);
+  uint8_t timeYear = decToBcd(time.tm_year - 100) & 0x7Fu;
+  status |= writeRegister(DS3231_REG_YEAR, timeYear);
+  return status == 0;
 }
 
 /**
@@ -83,19 +89,20 @@ bool DS3231::setTime(const std::tm &time) {
  *
  * @throws None
  */
-bool DS3231::getTime(std::tm &time) const {
+bool DS3231::getTime(std::tm &time) {
   // Read time from DS3231 and fill std::tm structure
   uint8_t timeData[7];
   if (!readRegister(DS3231_REG_TIME, timeData, sizeof(timeData))) {
     return false;
   }
 
-  time.tm_sec = bcdToDec(timeData[0]);
-  time.tm_min = bcdToDec(timeData[1]);
-  time.tm_hour = bcdToDec(timeData[2]);
-  time.tm_wday = bcdToDec(timeData[3]) - 1; // Day of week, 0-6
-  time.tm_mday = bcdToDec(timeData[4]);
-  time.tm_mon = bcdToDec(timeData[5]) - 1; // Months are zero-based in std::tm
+  time.tm_sec = bcdToDec(timeData[0]) & 0x7Fu;
+  time.tm_min = bcdToDec(timeData[1]) & 0x7Fu;
+  time.tm_hour = bcdToDec(timeData[2]) & 0x3Fu; // Use 24 - hour format
+  time.tm_wday = bcdToDec(timeData[3]) & 0x07u; // Day of week, 1-7
+  time.tm_mday = bcdToDec(timeData[4]) & 0x3Fu;
+  time.tm_mon = (bcdToDec(timeData[5]) & ~(1u << 7)) -
+                1; // Months are zero-based in std::tm
   time.tm_year = bcdToDec(timeData[6]) + 100; // Years since 1900
 
   return true;
@@ -108,7 +115,7 @@ bool DS3231::getTime(std::tm &time) const {
  *
  * @throws None if the temperature reading is successful.
  */
-float DS3231::getTemperature() const {
+float DS3231::getTemperature() {
   // Read temperature from DS3231
   uint8_t tempData[2];
   if (!readRegister(DS3231_REG_TEMP, tempData, sizeof(tempData))) {
@@ -138,12 +145,6 @@ bool DS3231::clearAlarmFlags() {
   return false; // Placeholder return value
 }
 
-bool DS3231::initialize() {
-  // Initialize the DS3231
-  // This function should be implemented to initialize the DS3231
-  return false; // Placeholder return value
-}
-
 /**
  * Read a register from the DS3231.
  *
@@ -155,15 +156,16 @@ bool DS3231::initialize() {
  *
  * @throws None
  */
-bool DS3231::readRegister(uint8_t reg, uint8_t *buf, size_t buf_size) const {
+bool DS3231::readRegister(uint8_t reg, uint8_t *buf, size_t buf_size) {
   // Read a register from the DS3231
   if (ioctl(i2c_bus_fd, I2C_SLAVE, DS3231_ADDRESS) < 0) {
     perror("Failed to acquire bus access and/or talk to slave.\n");
     return false;
   }
 
-  uint8_t buffer[1] = {reg};
-  if (write(i2c_bus_fd, buffer, 1) != 1) {
+  const uint8_t buffer[1] = {reg};
+
+  if (::write(i2c_bus_fd, buffer, sizeof(buffer)) != 1) {
     perror("Failed to write register address to the i2c bus.\n");
     return false;
   }
@@ -199,24 +201,23 @@ uint8_t DS3231::decToBcd(uint8_t dec) const {
 }
 
 /**
- * Write data to a register in the DS3231.
+ * Writes a value to a register of the DS3231 device.
  *
  * @param reg the register to write to
- * @param data a pointer to the data to write
- * @param data_size the size of the data to write
+ * @param val the value to write
  *
  * @return true if the write was successful, false otherwise
  *
  * @throws None
  */
-bool DS3231::writeRegister(uint8_t reg, const uint8_t *data, size_t data_size) {
-  // Write to a register in the DS3231
+bool DS3231::writeRegister(uint8_t reg, uint8_t val) {
+  uint8_t buffer[2] = {reg, val};
   if (ioctl(i2c_bus_fd, I2C_SLAVE, DS3231_ADDRESS) < 0) {
     perror("Failed to acquire bus access and/or talk to slave.\n");
     return false;
   }
 
-  if (write(i2c_bus_fd, data, data_size) != static_cast<ssize_t>(data_size)) {
+  if (::write(i2c_bus_fd, buffer, sizeof(buffer)) != sizeof(buffer)) {
     perror("Failed to write to the i2c bus.\n");
     return false;
   }
